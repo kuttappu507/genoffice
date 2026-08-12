@@ -20,6 +20,7 @@ import {
   dialog,
   ipcMain,
   Menu,
+  net,
   screen,
   session as electronSession,
   shell,
@@ -36,6 +37,7 @@ import type {
 import { z } from 'zod'
 import {
   appMenuLabels,
+  configuredDefaultSaveDir,
   contextMenuLabels,
   installContextMenu,
   installNavigationGuard,
@@ -54,6 +56,7 @@ import {
   chatForProvider,
   defaultAiSettings,
   resolveAiSettings,
+  setRescueFetch,
   streamForProvider,
   type AiProviderId,
   type AiSettings,
@@ -1076,7 +1079,14 @@ async function openFileDialog(event: IpcMainInvokeEvent, options: OpenDialogOpti
 }
 
 async function saveFileDialog(event: IpcMainInvokeEvent, options: SaveDialogOptions) {
-  return showSaveDialogWithMemory(dialog, dialogParent(event), options)
+  // before any pick is remembered, bare-name suggestions anchor in the
+  // configurable default save folder instead of Electron's Downloads pin
+  return showSaveDialogWithMemory(
+    dialog,
+    dialogParent(event),
+    options,
+    configuredDefaultSaveDir(app),
+  )
 }
 
 /** register a tab's webContents/client pair and wire up cleanup on teardown */
@@ -2105,6 +2115,9 @@ export function registerSheetsAiIpc(): void {
   if (aiIpcRegistered) return
   aiIpcRegistered = true
 
+  // Node fetch (undici) direct connections get reset under VPN/tun setups; retry over Chromium's stack
+  setRescueFetch((url, init) => net.fetch(url, init))
+
   ipcMain.handle(IPC_CHANNELS.aiGetSettings, (event): AiSettings => {
     sessionFor(event)
     const stored = readJson<Partial<AiSettings> & LegacyAiSettings>(SETTINGS_PATH(), {})
@@ -2462,6 +2475,8 @@ async function writeWorkbookTo(
       })
     } else if ('hidden' in op) {
       sheetOps.push({ kind: op.kind, start: op.start, end: op.end, hidden: op.hidden })
+    } else if ('before' in op) {
+      sheetOps.push({ kind: op.kind, index: op.index, count: op.count, before: op.before })
     } else {
       sheetOps.push({ kind: op.kind, index: op.index, count: op.count })
     }
@@ -2617,7 +2632,7 @@ async function openWorkbookSession(
   csvImport?: boolean,
 ): Promise<WorkbookFile> {
   const [opened, digest] = await Promise.all([
-    client.open(path).then((result) => sidecarOpenResultSchema.parse(result)),
+    client.open(path, getUiLang()).then((result) => sidecarOpenResultSchema.parse(result)),
     sha256File(path),
   ])
   sessions.set(opened.sessionId, {

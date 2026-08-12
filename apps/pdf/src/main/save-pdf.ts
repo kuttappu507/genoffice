@@ -9,16 +9,74 @@ import {
   PDFOptionList,
   degrees,
 } from 'pdf-lib'
-import type { PDFPage, PDFRef } from 'pdf-lib'
+import type { PDFDict, PDFPage, PDFRef } from 'pdf-lib'
+import { VISUAL_SIGNATURE_CONTENT_PREFIX } from '../shared/ipc'
 import type {
   DrawingInput,
   FormValueInput,
+  ImageEditFailure,
   MarkupInput,
   MetadataInput,
   SavePdfRequest,
+  StaticFormFillRecord,
+  TextEditFailure,
+  TextInsertFailure,
 } from '../shared/ipc'
 
 const num = (v: number) => Math.round(v * 100) / 100
+const STATIC_FORM_FILLS_KEY = PDFName.of('GenOfficeStaticFormFills')
+
+function validStaticFormFill(value: unknown): value is StaticFormFillRecord {
+  if (!value || typeof value !== 'object') return false
+  const record = value as Partial<StaticFormFillRecord>
+  return (
+    typeof record.id === 'string' &&
+    (record.kind === 'text' || record.kind === 'check' || record.kind === 'cross') &&
+    Number.isInteger(record.pageIndex) &&
+    Array.isArray(record.rect) &&
+    record.rect.length === 4 &&
+    record.rect.every((entry) => typeof entry === 'number' && Number.isFinite(entry))
+  )
+}
+
+export async function readStaticFormFills(bytes: Uint8Array): Promise<StaticFormFillRecord[]> {
+  const pdfDoc = await PDFDocument.load(bytes, { updateMetadata: false })
+  const value = pdfDoc.catalog.get(STATIC_FORM_FILLS_KEY)
+  if (!(value instanceof PDFHexString)) return []
+  try {
+    const parsed: unknown = JSON.parse(value.decodeText())
+    return Array.isArray(parsed) ? parsed.filter(validStaticFormFill) : []
+  } catch {
+    return []
+  }
+}
+
+function resultingStaticFormFills(
+  request: SavePdfRequest,
+  pageCount: number,
+): StaticFormFillRecord[] | undefined {
+  if (request.staticFormFills === undefined) return undefined
+  const deleted = new Set(request.deletedPages ?? [])
+  const remaining =
+    request.pageOrder?.filter((pageIndex) => !deleted.has(pageIndex)) ??
+    Array.from({ length: pageCount }, (_, pageIndex) => pageIndex).filter(
+      (pageIndex) => !deleted.has(pageIndex),
+    )
+  const newPageIndex = new Map(remaining.map((oldPageIndex, index) => [oldPageIndex, index]))
+  return request.staticFormFills.flatMap((record) => {
+    const pageIndex = newPageIndex.get(record.pageIndex)
+    return pageIndex === undefined ? [] : [{ ...record, pageIndex }]
+  })
+}
+
+function setVisualSignatureMetadata(annot: PDFDict, fieldName: string | undefined): void {
+  if (!fieldName) return
+  annot.set(PDFName.of('GenOfficeFormField'), PDFHexString.fromText(fieldName))
+  annot.set(
+    PDFName.of('Contents'),
+    PDFHexString.fromText(`${VISUAL_SIGNATURE_CONTENT_PREFIX}${fieldName}`),
+  )
+}
 
 const quadBounds = (q: number[]) => {
   const xs = [q[0]!, q[2]!, q[4]!, q[6]!]
@@ -169,6 +227,7 @@ async function addImageStamp(
     AP: { N: pdfDoc.context.register(ap) },
   })
   annot.set(PDFName.of('T'), PDFHexString.fromText('GenOffice'))
+  setVisualSignatureMetadata(annot, d.formFieldName)
   appendAnnot(pdfDoc, page, pdfDoc.context.register(annot))
 }
 
@@ -261,6 +320,7 @@ function addDrawing(pdfDoc: PDFDocument, page: PDFPage, d: DrawingInput): void {
     annot.set(PDFName.of('L'), pdfDoc.context.obj([...d.from, ...d.to]))
   }
   annot.set(PDFName.of('T'), PDFHexString.fromText('GenOffice'))
+  if (d.kind === 'ink') setVisualSignatureMetadata(annot, d.formFieldName)
   appendAnnot(pdfDoc, page, pdfDoc.context.register(annot))
 }
 
@@ -332,13 +392,91 @@ function applyMetadata(pdfDoc: PDFDocument, meta: MetadataInput): void {
  * The source file is only ever read: Save As (targetPath !== sourcePath) must never mutate
  * the original document, and a failed or cancelled save leaves both paths untouched.
  * In-place Save passes targetPath === sourcePath.
+ * Returns the text edits that no longer matched the document and were skipped.
  */
+export interface SavePdfSkips {
+  skippedTextEdits: TextEditFailure[]
+  skippedTextInserts: TextInsertFailure[]
+  skippedImageEdits: ImageEditFailure[]
+}
+
+/** Original page index → index in the saved file (after this request's deletions/reorder);
+    null = the page is gone from the output */
+function finalPageIndex(request: SavePdfRequest, p: number): number | null {
+  if (request.pageOrder) {
+    const i = request.pageOrder.indexOf(p)
+    return i >= 0 ? i : null
+  }
+  const del = request.deletedPages ?? []
+  if (del.includes(p)) return null
+  return p - del.filter((d) => d < p).length
+}
+
+/**
+ * Read-back verification of applied content-stream edits against the final bytes.
+ * Anything that fails here would have been silent data loss; the caller aborts the
+ * save before the bytes reach disk, keeping the original file and the pending edits.
+ */
+async function verifyContentEdits(
+  bytes: Uint8Array,
+  request: SavePdfRequest,
+  skips: SavePdfSkips,
+): Promise<void> {
+  const failures: { pageIndex: number; reason: string }[] = []
+  const appliedText = (request.textEdits ?? []).filter(
+    (e) =>
+      !skips.skippedTextEdits.some((s) => s.pageIndex === e.pageIndex && s.oldText === e.oldText),
+  )
+  if (appliedText.length > 0) {
+    const { verifyTextEdits } = await import('./text-edit')
+    const remapped = appliedText.flatMap((e) => {
+      const pageIndex = finalPageIndex(request, e.pageIndex)
+      return pageIndex === null ? [] : [{ pageIndex, newText: e.newText }]
+    })
+    failures.push(...(await verifyTextEdits(bytes, remapped)))
+  }
+  const appliedInserts = (request.textInserts ?? []).filter(
+    (_insert, editIndex) =>
+      !skips.skippedTextInserts.some((skipped) => skipped.editIndex === editIndex),
+  )
+  if (appliedInserts.length > 0) {
+    const { verifyTextEdits } = await import('./text-edit')
+    const remapped = appliedInserts.flatMap((insert) => {
+      const pageIndex = finalPageIndex(request, insert.pageIndex)
+      return pageIndex === null ? [] : [{ pageIndex, newText: insert.text }]
+    })
+    failures.push(...(await verifyTextEdits(bytes, remapped)))
+  }
+  const appliedImages = (request.imageEdits ?? []).filter(
+    (e, i) => e.kind !== 'deleteImage' && !skips.skippedImageEdits.some((s) => s.editIndex === i),
+  )
+  if (appliedImages.length > 0) {
+    const { verifyImageEdits } = await import('./image-edit')
+    const remapped = appliedImages.flatMap((e) => {
+      const pageIndex = finalPageIndex(request, e.pageIndex)
+      return pageIndex === null || e.kind === 'deleteImage' ? [] : [{ pageIndex, rect: e.rect }]
+    })
+    failures.push(...(await verifyImageEdits(bytes, remapped)))
+  }
+  if (failures.length > 0) {
+    const pages = [...new Set(failures.map((f) => f.pageIndex + 1))].sort((a, b) => a - b)
+    // "save-verify-failed pages=…" is parsed by the renderer to localize the notice
+    throw new Error(
+      `save-verify-failed pages=${pages.join(',')}: ${failures[0]!.reason}; the file was not written`,
+    )
+  }
+}
+
 export async function savePdfToPath(
   sourcePath: string,
   targetPath: string,
   request: SavePdfRequest,
-): Promise<void> {
-  const bytes = await applySaveRequest(new Uint8Array(await readFile(sourcePath)), request)
+): Promise<SavePdfSkips> {
+  const { bytes, ...skips } = await applySaveRequest(
+    new Uint8Array(await readFile(sourcePath)),
+    request,
+  )
+  await verifyContentEdits(bytes, request, skips)
   const tmp = `${targetPath}.gensave-${process.pid}.tmp`
   try {
     await writeFile(tmp, bytes)
@@ -347,13 +485,52 @@ export async function savePdfToPath(
     await rm(tmp, { force: true })
     throw err
   }
+  return skips
+}
+
+export interface AppliedSaveRequest {
+  bytes: Uint8Array
+  /** Text edits that could not be matched to the document; the rest of the request is in `bytes` */
+  skippedTextEdits: TextEditFailure[]
+  skippedTextInserts: TextInsertFailure[]
+  /** Same, for content-stream image operations */
+  skippedImageEdits: ImageEditFailure[]
 }
 
 /** Apply markups + form values + page ops, returning new bytes. Original objects are not reordered (pdf-lib keeps untouched objects). */
 export async function applySaveRequest(
   bytes: Uint8Array,
   request: SavePdfRequest,
-): Promise<Uint8Array> {
+): Promise<AppliedSaveRequest> {
+  let skippedTextEdits: TextEditFailure[] = []
+  let skippedTextInserts: TextInsertFailure[] = []
+  let skippedImageEdits: ImageEditFailure[] = []
+  if (request.annotDeletes && request.annotDeletes.length > 0) {
+    // First stage: the object numbers address the on-disk bytes; later pdfium
+    // rewrites (text/image edits) may renumber objects
+    const { applyAnnotDeletes } = await import('./annot-delete')
+    bytes = await applyAnnotDeletes(bytes, request.annotDeletes)
+  }
+  if (request.textEdits && request.textEdits.length > 0) {
+    // Content-stream rewrite must land before pdf-lib touches the bytes: everything
+    // below annotates on top of whatever the pages now say
+    const { applyTextEdits } = await import('./text-edit')
+    const applied = await applyTextEdits(bytes, request.textEdits)
+    bytes = applied.bytes
+    skippedTextEdits = applied.skipped
+  }
+  if (request.textInserts && request.textInserts.length > 0) {
+    const { applyTextInserts } = await import('./text-edit')
+    const applied = await applyTextInserts(bytes, request.textInserts)
+    bytes = applied.bytes
+    skippedTextInserts = applied.skipped
+  }
+  if (request.imageEdits && request.imageEdits.length > 0) {
+    const { applyImageEdits } = await import('./image-edit')
+    const applied = await applyImageEdits(bytes, request.imageEdits)
+    bytes = applied.bytes
+    skippedImageEdits = applied.skipped
+  }
   const pdfDoc = await PDFDocument.load(bytes, { updateMetadata: false })
   if (request.formValues.length > 0) applyFormValues(pdfDoc, request.formValues)
   const pages = pdfDoc.getPages()
@@ -405,13 +582,32 @@ export async function applySaveRequest(
       for (const p of target) pdfDoc.addPage(p)
     }
   }
+  const staticFormFills = resultingStaticFormFills(request, pages.length)
+  if (staticFormFills !== undefined) {
+    if (staticFormFills.length === 0) pdfDoc.catalog.delete(STATIC_FORM_FILLS_KEY)
+    else
+      pdfDoc.catalog.set(
+        STATIC_FORM_FILLS_KEY,
+        PDFHexString.fromText(JSON.stringify(staticFormFills)),
+      )
+  }
   try {
-    return await pdfDoc.save({ useObjectStreams: false })
+    return {
+      bytes: await pdfDoc.save({ useObjectStreams: false }),
+      skippedTextEdits,
+      skippedTextInserts,
+      skippedImageEdits,
+    }
   } catch (err) {
     // Form values beyond WinAnsi (e.g. CJK) make pdf-lib's appearance generation fail:
     // skip it and set NeedAppearances so viewers rebuild them (Acrobat/pdfjs both support this)
     if (request.formValues.length === 0) throw err
     pdfDoc.getForm().acroForm.dict.set(PDFName.of('NeedAppearances'), PDFBool.True)
-    return await pdfDoc.save({ useObjectStreams: false, updateFieldAppearances: false })
+    return {
+      bytes: await pdfDoc.save({ useObjectStreams: false, updateFieldAppearances: false }),
+      skippedTextEdits,
+      skippedTextInserts,
+      skippedImageEdits,
+    }
   }
 }
