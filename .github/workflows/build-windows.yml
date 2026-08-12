@@ -7,10 +7,6 @@ on:
     paths:
       - 'apps/**'
       - 'packages/**'
-      - 'tools/fix-openrouter-chat-route.mjs'
-      - 'tools/fix-openrouter-suite-routes.mjs'
-      - 'tools/fix-openrouter-runtime.mjs'
-      - 'tools/fix-ai-settings-runtime.mjs'
       - 'package.json'
       - 'package-lock.json'
       - '.github/workflows/build-windows.yml'
@@ -35,14 +31,6 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
       - name: Install dependencies
         run: npm ci
-      - name: Apply direct AI provider runtime fixes
-        run: node tools/fix-openrouter-runtime.mjs
-      - name: Apply AI settings runtime hardening
-        run: node tools/fix-ai-settings-runtime.mjs
-      - name: Apply compatible AI route fixes
-        run: |
-          node tools/fix-openrouter-chat-route.mjs
-          node tools/fix-openrouter-suite-routes.mjs
       - name: Typecheck
         run: npm run typecheck
       - name: Build Windows installer
