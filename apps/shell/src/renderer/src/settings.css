@@ -164,9 +164,6 @@
   word-break: break-all;
 }
 
-/* GenMail-style select pill: the visible layer is just the current value +
-   chevron (width hugs the content); the real <select> sits on top invisibly
-   and only supplies the click target and the native popup. */
 .set-select-wrap {
   position: relative;
   flex-shrink: 0;
@@ -206,8 +203,6 @@
   opacity: 0;
   font: inherit;
   cursor: pointer;
-  /* the element is invisible, but the OS popup that opens on click reads its
-     computed color/background to render the option list */
   color: var(--text-primary);
   background: var(--surface);
 }
@@ -215,6 +210,35 @@
 .set-select option {
   color: var(--text-primary);
   background: var(--surface);
+}
+
+/* AI Settings text/password/model inputs must NOT use the invisible native
+   select overlay rules above. The previous shared class caused an invisible
+   full-viewport input to capture all mouse/keyboard events and made the whole
+   Settings window appear frozen. */
+input.set-select {
+  position: static;
+  inset: auto;
+  opacity: 1;
+  width: auto;
+  min-width: 250px;
+  height: 34px;
+  box-sizing: border-box;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text-primary);
+  cursor: text;
+  pointer-events: auto;
+}
+
+input.set-select:focus {
+  outline: 2px solid color-mix(in srgb, var(--color-btn-primary) 25%, transparent);
+  outline-offset: 1px;
+}
+
+input.set-select::placeholder {
+  color: var(--text-tertiary);
 }
 
 .set-btn {
