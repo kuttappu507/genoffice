@@ -9,6 +9,7 @@ on:
       - 'packages/**'
       - 'tools/fix-openrouter-chat-route.mjs'
       - 'tools/fix-openrouter-suite-routes.mjs'
+      - 'tools/fix-openrouter-runtime.mjs'
       - 'package.json'
       - 'package-lock.json'
       - '.github/workflows/build-windows.yml'
@@ -20,40 +21,31 @@ jobs:
   build-windows:
     runs-on: windows-latest
     timeout-minutes: 60
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: package-lock.json
-
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
-
       - name: Install dependencies
         run: npm ci
-
-      # The upstream merge changed the shell Home/Settings UI. The old fork
-      # patchers depended on exact Home.tsx text and must not mutate the tree
-      # during CI. These two route fixes are already compatible with upstream.
+      - name: Apply direct AI provider runtime fixes
+        run: node tools/fix-openrouter-runtime.mjs
       - name: Apply compatible AI route fixes
         run: |
           node tools/fix-openrouter-chat-route.mjs
           node tools/fix-openrouter-suite-routes.mjs
-
       - name: Typecheck
         run: npm run typecheck
-
       - name: Build Windows installer
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
         run: npm run dist:win
-
       - name: Show packaged files
         if: always()
         shell: pwsh
@@ -63,7 +55,6 @@ jobs:
           } else {
             Write-Host 'apps/shell/release does not exist'
           }
-
       - name: Upload Windows installer
         uses: actions/upload-artifact@v4
         with:
