@@ -30,7 +30,8 @@ jobs:
           if (start < 0 || end < 0) throw new Error('embedded repair script not found')
           const raw = yaml.slice(start + "node <<'NODE'".length, end)
           const script = raw.split('\n').map((line) => line.startsWith('          ') ? line.slice(10) : line).join('\n')
-          const result = cp.spawnSync(process.execPath, ['-e', script], { stdio: 'inherit' })
+          fs.writeFileSync('.github/ai-transport-repair.cjs', script)
+          const result = cp.spawnSync(process.execPath, ['.github/ai-transport-repair.cjs'], { stdio: 'inherit' })
           if (result.status !== 0) process.exit(result.status ?? 1)
           NODE
       - name: Run focused checks
@@ -40,6 +41,7 @@ jobs:
           npx tsc --noEmit -p packages/ai-provider/tsconfig.json
       - name: Commit repair
         run: |
+          rm -f .github/ai-transport-repair.cjs
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add packages/ai-provider/src/stream.ts
