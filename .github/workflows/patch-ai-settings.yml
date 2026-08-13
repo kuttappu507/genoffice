@@ -1,0 +1,62 @@
+name: Harden AI Settings UI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'apps/shell/src/renderer/src/SettingsModal.tsx'
+      - '.github/workflows/patch-ai-settings.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: ${{ !contains(github.event.head_commit.message, '[patch-ai-settings]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch SettingsModal
+        shell: bash
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs')
+          const path = 'apps/shell/src/renderer/src/SettingsModal.tsx'
+          let s = fs.readFileSync(path, 'utf8')
+          const replacements = [
+            [
+              "  const [aiSaved, setAiSaved] = useState(false)\n",
+              "  const [aiSaved, setAiSaved] = useState(false)\n  const [aiError, setAiError] = useState<string | null>(null)\n  const [aiLoading, setAiLoading] = useState(true)\n",
+            ],
+            [
+              "    void window.aiOffice.getAiSettings?.().then((settings) => {\n      if (!alive) return\n      setAiSettings(settings); setAiProvider(settings.provider)\n      const current = settings.providers[settings.provider]\n      setAiKey(current?.apiKey ?? ''); setAiModel(current?.model ?? '')\n      setAiBaseUrl(current?.baseUrl ?? '');\n    }).catch(() => undefined)\n",
+              "    void window.aiOffice.getAiSettings?.().then((settings) => {\n      if (!alive) return\n      setAiError(null)\n      setAiSettings(settings); setAiProvider(settings.provider)\n      const current = settings.providers[settings.provider]\n      setAiKey(current?.apiKey ?? ''); setAiModel(current?.model ?? '')\n      setAiBaseUrl(current?.baseUrl ?? '')\n    }).catch((error) => {\n      if (!alive) return\n      setAiError(error instanceof Error ? error.message : 'Unable to load AI settings')\n    }).finally(() => {\n      if (alive) setAiLoading(false)\n    })\n",
+            ],
+            [
+              "    setAiProvider(provider); setAiKey(current?.apiKey ?? ''); setAiBaseUrl(current?.baseUrl ?? '')\n    setAiModel(current?.model || meta?.defaultModel || ''); setAiSaved(false)\n",
+              "    setAiProvider(provider); setAiKey(current?.apiKey ?? ''); setAiBaseUrl(current?.baseUrl ?? '')\n    setAiModel(current?.model || meta?.defaultModel || ''); setAiSaved(false); setAiError(null)\n",
+            ],
+            [
+              "    setAiSaving(true); setAiSaved(false)\n    try {\n      const providers = { ...aiSettings.providers }\n      const previous = providers[aiProvider] ?? { apiKey: '', model: '', baseUrl: undefined }\n      providers[aiProvider] = { ...previous, apiKey: aiKey.trim(), model: aiModel.trim(), baseUrl: aiProvider === 'custom' ? aiBaseUrl.trim() : previous.baseUrl }\n      const next: AiSettings = { provider: aiProvider, providers }\n      await window.aiOffice.setAiSettings(next); setAiSettings(next); setAiSaved(true)\n    } finally { setAiSaving(false) }\n",
+              "    setAiSaving(true); setAiSaved(false); setAiError(null)\n    try {\n      const providers = { ...aiSettings.providers }\n      const previous = providers[aiProvider] ?? { apiKey: '', model: '', baseUrl: undefined }\n      providers[aiProvider] = { ...previous, apiKey: aiKey.trim(), model: aiModel.trim(), baseUrl: aiProvider === 'custom' ? aiBaseUrl.trim() : previous.baseUrl }\n      const next: AiSettings = { provider: aiProvider, providers }\n      await window.aiOffice.setAiSettings(next); setAiSettings(next); setAiSaved(true)\n    } catch (error) {\n      setAiError(error instanceof Error ? error.message : 'Unable to save AI settings')\n    } finally { setAiSaving(false) }\n",
+            ],
+            [
+              "            <h3 className=\"set-pane-title\">AI</h3>\n",
+              "            <h3 className=\"set-pane-title\">AI</h3>\n            {aiLoading && <div role=\"status\" style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 12 }}>Loading AI settings…</div>}\n            {aiError && <div role=\"alert\" style={{ fontSize: 12, color: 'var(--danger)', marginBottom: 12 }}>{aiError}</div>}\n",
+            ],
+          ]
+          for (const [from, to] of replacements) {
+            if (!s.includes(from)) throw new Error('Patch anchor not found: ' + from.slice(0, 90))
+            s = s.replace(from, to)
+          }
+          fs.writeFileSync(path, s)
+          NODE
+      - name: Format
+        run: npx prettier --write apps/shell/src/renderer/src/SettingsModal.tsx
+      - name: Commit patch
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add apps/shell/src/renderer/src/SettingsModal.tsx
+          git commit -m 'fix(settings): surface AI configuration errors [patch-ai-settings]'
+          git push
