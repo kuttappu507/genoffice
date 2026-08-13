@@ -22,7 +22,7 @@ jobs:
           cache: npm
           cache-dependency-path: package-lock.json
       - run: npm ci
-      - name: Remove legacy provider override and canonicalize formatting
+      - name: Remove legacy provider override and normalize audit fixes
         shell: bash
         run: |
           node <<'NODE'
@@ -37,16 +37,22 @@ jobs:
 
           const providers = 'packages/ai-provider/src/providers.ts'
           let providerText = fs.readFileSync(providers, 'utf8')
-          const fencePattern = /  let activeProvider: AiProviderId = migratedProvider === 'genspark' \? defaults\.provider : migratedProvider\n  const settings = \{ provider: activeProvider, providers \}\n[\s\S]*?  return settings\n}/
-          if (!fencePattern.test(providerText)) throw new Error('Provider compatibility fence anchor not found')
-          providerText = providerText.replace(
-            fencePattern,
-            "  return {\n    provider: migratedProvider === 'genspark' ? defaults.provider : migratedProvider,\n    providers,\n  }\n}"
-          )
+          const start = providerText.indexOf('  let activeProvider:')
+          const end = providerText.lastIndexOf('\n}')
+          if (start < 0 || end <= start) throw new Error('Provider compatibility fence anchor not found')
+          providerText = providerText.slice(0, start) + "  return {\n    provider: migratedProvider === 'genspark' ? defaults.provider : migratedProvider,\n    providers,\n  }\n" + providerText.slice(end + 1)
           fs.writeFileSync(providers, providerText)
+
+          const secure = 'packages/ai-provider/src/electron-secure-ipc.ts'
+          let secureText = fs.readFileSync(secure, 'utf8')
+          const oldSecure = "    if (typeof process === 'undefined' || process.type !== 'browser') return null\n"
+          const newSecure = "    if (typeof process === 'undefined' || (process as NodeJS.Process & { type?: string }).type !== 'browser') return null\n"
+          if (!secureText.includes(oldSecure)) throw new Error('secure IPC process guard anchor not found')
+          secureText = secureText.replace(oldSecure, newSecure)
+          fs.writeFileSync(secure, secureText)
           NODE
       - name: Format changed sources
-        run: npx prettier --write apps/docs/src/main/docs-main.ts packages/ai-provider/src/providers.ts apps/slides/src/main/ai-ipc.ts
+        run: npx prettier --write apps/docs/src/main/docs-main.ts packages/ai-provider/src/providers.ts packages/ai-provider/src/electron-secure-ipc.ts apps/slides/src/main/ai-ipc.ts
       - name: Verify focused lint
         run: npx eslint apps/docs/src/main/docs-main.ts packages/ai-provider/src/providers.ts packages/ai-provider/src/electron-secure-ipc.ts apps/slides/src/main/ai-ipc.ts apps/android/src/pdf-android-platform.ts
       - name: Verify typecheck
@@ -55,6 +61,6 @@ jobs:
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add apps/docs/src/main/docs-main.ts packages/ai-provider/src/providers.ts apps/slides/src/main/ai-ipc.ts
-          git commit -m 'fix(ai): remove legacy provider override and normalize audit fixes [deep-audit]'
+          git add apps/docs/src/main/docs-main.ts packages/ai-provider/src/providers.ts packages/ai-provider/src/electron-secure-ipc.ts apps/slides/src/main/ai-ipc.ts
+          git commit -m 'fix(ai): remove legacy override and fix secure IPC typing [deep-audit]'
           git push
