@@ -7,6 +7,7 @@ import {
   OPENROUTER_BASE_URL,
 } from './providers'
 import { createStreamWatchdog } from './watchdog'
+import { toGeminiSchema } from './gemini-schema'
 import type { AiProviderConfig, AiProviderId } from './types'
 
 export interface RobustStreamCallbacks {
@@ -317,9 +318,7 @@ async function openAi(
     cb.onActivity?.()
     if (!response.ok) {
       const text = await response.text()
-      throw isCredits(text)
-        ? new CreditsError(text)
-        : new Error(`HTTP ${response.status}: ${text}`)
+      throw isCredits(text) ? new CreditsError(text) : new Error(`HTTP ${response.status}: ${text}`)
     }
     if (jsonResponse(response)) {
       const body = await parseBody(response, 'The model returned an unparseable JSON body')
@@ -402,11 +401,7 @@ async function openAi(
     const normalized = normalizeStop(finishReason)
     if (normalized) cb.onStopReason?.(normalized)
     if (!emitted && !finishReason) throw new Error('The model returned no content')
-    if (
-      !emitted &&
-      finishReason &&
-      !['stop', 'tool_calls'].includes(finishReason)
-    ) {
+    if (!emitted && finishReason && !['stop', 'tool_calls'].includes(finishReason)) {
       throw new Error(`The model returned no content (finish_reason=${finishReason})`)
     }
   })
@@ -575,7 +570,7 @@ async function gemini(
                   functionDeclarations: tools.map((t) => ({
                     name: t.name,
                     description: t.description,
-                    parameters: t.inputSchema,
+                    parameters: toGeminiSchema(t.inputSchema),
                   })),
                 },
               ],
@@ -642,21 +637,13 @@ async function gemini(
     }
     if (finishReason) cb.onStopReason?.(normalizeStop(finishReason)!)
     if (!emitted && !finishReason) throw new Error('Gemini returned no content')
-    if (
-      !emitted &&
-      finishReason &&
-      !['STOP', 'END_TURN'].includes(finishReason)
-    ) {
+    if (!emitted && finishReason && !['STOP', 'END_TURN'].includes(finishReason)) {
       throw new Error(`Gemini returned no content (finishReason=${finishReason})`)
     }
   })
 }
 
-function consumeGemini(
-  body: any,
-  cb: RobustStreamCallbacks,
-  CreditsError: CreditsErrorCtor,
-): void {
+function consumeGemini(body: any, cb: RobustStreamCallbacks, CreditsError: CreditsErrorCtor): void {
   const chunks = Array.isArray(body) ? body : [body]
   let emitted = false
   let reason: string | undefined
