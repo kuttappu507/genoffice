@@ -269,6 +269,36 @@ function validate(provider: AiProviderId, messages: AgentMessage[], tools: Agent
   }
 }
 
+async function fetchOpenAiWithRateLimitRetry(
+  url: string,
+  init: RequestInit,
+  signal: AbortSignal,
+): Promise<Response> {
+  const maxAttempts = 3
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    const response = await fetch(url, init)
+    if (response.status !== 429 || attempt === maxAttempts - 1) return response
+    const retryAfter = Number(response.headers.get('retry-after') ?? '')
+    const delayMs =
+      Number.isFinite(retryAfter) && retryAfter > 0
+        ? Math.min(10_000, retryAfter * 1000)
+        : Math.min(4_000, 500 * 2 ** attempt)
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(resolve, delayMs)
+      const onAbort = () => {
+        clearTimeout(timer)
+        reject(new DOMException('The request was aborted', 'AbortError'))
+      }
+      if (signal.aborted) {
+        onAbort()
+        return
+      }
+      signal.addEventListener('abort', onAbort, { once: true })
+    })
+  }
+  throw new Error('Unreachable')
+}
+
 async function openAi(
   baseUrl: string,
   config: AiProviderConfig,
@@ -281,40 +311,44 @@ async function openAi(
   extraHeaders: Record<string, string> = {},
 ): Promise<void> {
   await withWatchdog(cb, async (signal, touch) => {
-    const response = await fetch(`${baseUrl.replace(/\/$/, '')}/chat/completions`, {
-      method: 'POST',
-      signal,
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${config.apiKey}`,
-        ...extraHeaders,
+    const response = await fetchOpenAiWithRateLimitRetry(
+      `${baseUrl.replace(/\/$/, '')}/chat/completions`,
+      {
+        method: 'POST',
+        signal,
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${config.apiKey}`,
+          ...extraHeaders,
+        },
+        body: JSON.stringify({
+          model: config.model,
+          max_tokens: maxTokens,
+          messages: assistantMessages(system, messages),
+          ...(tools.length
+            ? {
+                tools: tools.map((t) => ({
+                  type: 'function',
+                  function: {
+                    name: t.name,
+                    description: t.description,
+                    parameters: t.inputSchema,
+                  },
+                })),
+              }
+            : {}),
+          temperature:
+            config.model.includes('nemotron-3-super') || config.model.includes('nemotron-3-ultra')
+              ? 1
+              : 0.3,
+          ...(config.model.includes('nemotron-3-super') || config.model.includes('nemotron-3-ultra')
+            ? { top_p: 0.95 }
+            : {}),
+          stream: true,
+        }),
       },
-      body: JSON.stringify({
-        model: config.model,
-        max_tokens: maxTokens,
-        messages: assistantMessages(system, messages),
-        ...(tools.length
-          ? {
-              tools: tools.map((t) => ({
-                type: 'function',
-                function: {
-                  name: t.name,
-                  description: t.description,
-                  parameters: t.inputSchema,
-                },
-              })),
-            }
-          : {}),
-        temperature:
-          config.model.includes('nemotron-3-super') || config.model.includes('nemotron-3-ultra')
-            ? 1
-            : 0.3,
-        ...(config.model.includes('nemotron-3-super') || config.model.includes('nemotron-3-ultra')
-          ? { top_p: 0.95 }
-          : {}),
-        stream: true,
-      }),
-    })
+      signal,
+    )
     cb.onActivity?.()
     if (!response.ok) {
       const text = await response.text()

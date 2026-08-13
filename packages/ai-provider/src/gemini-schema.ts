@@ -11,7 +11,10 @@ type JsonSchema = {
 
 type GeminiSchema = Record<string, unknown>
 
-function normalizeType(type: string | string[] | undefined, schema: JsonSchema): string | undefined {
+function normalizeType(
+  type: string | string[] | undefined,
+  schema: JsonSchema,
+): string | undefined {
   const candidate = Array.isArray(type) ? type.find((value) => value !== 'null') : type
   if (candidate) {
     const normalized = candidate.toUpperCase()
@@ -66,8 +69,10 @@ export function toGeminiSchema(input: unknown): GeminiSchema {
 
   if (schema.items) {
     const item = Array.isArray(schema.items) ? schema.items[0] : schema.items
-    if (item) result.items = toGeminiSchema(item)
+    if (item && typeof item === 'object') result.items = toGeminiSchema(item)
   }
+
+  if (result.type === 'ARRAY' && !result.items) result.items = { type: 'STRING' }
 
   return result
 }
