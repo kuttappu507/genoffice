@@ -37,10 +37,12 @@ jobs:
 
           const providers = 'packages/ai-provider/src/providers.ts'
           let providerText = fs.readFileSync(providers, 'utf8')
-          const fenceOld = `  let activeProvider: AiProviderId = migratedProvider === 'genspark' ? defaults.provider : migratedProvider\n  const settings = { provider: activeProvider, providers }\n  // Temporary compatibility fence: upstream-derived main-process code may still assign\n  // settings.provider = 'genspark'. Ignore that one obsolete assignment while allowing\n  // every real provider selection to remain writable. This will be removed when that\n  // upstream-derived handler is fully deleted.\n  Object.defineProperty(settings, 'provider', {\n    enumerable: true,\n    configurable: true,\n    get: () => activeProvider,\n    set: (value: AiProviderId) => {\n      if (value !== 'genspark' && AI_PROVIDERS.some((meta) => meta.id === value)) activeProvider = value\n    },\n  })\n  return settings\n`
-          const fenceNew = `  return {\n    provider: migratedProvider === 'genspark' ? defaults.provider : migratedProvider,\n    providers,\n  }\n`
-          if (!providerText.includes(fenceOld)) throw new Error('Provider compatibility fence anchor not found')
-          providerText = providerText.replace(fenceOld, fenceNew)
+          const fencePattern = /  let activeProvider: AiProviderId = migratedProvider === 'genspark' \? defaults\.provider : migratedProvider\n  const settings = \{ provider: activeProvider, providers \}\n[\s\S]*?  return settings\n}/
+          if (!fencePattern.test(providerText)) throw new Error('Provider compatibility fence anchor not found')
+          providerText = providerText.replace(
+            fencePattern,
+            "  return {\n    provider: migratedProvider === 'genspark' ? defaults.provider : migratedProvider,\n    providers,\n  }\n}"
+          )
           fs.writeFileSync(providers, providerText)
           NODE
       - name: Format changed sources
