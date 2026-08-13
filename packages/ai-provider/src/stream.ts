@@ -299,7 +299,7 @@ function geminiContents(messages: AgentMessage[]) {
         role: 'user',
         parts: m.results.map((r) => ({
           functionResponse: {
-            name: r.id,
+            name: r.name,
             response: { result: r.output },
           },
         })),
