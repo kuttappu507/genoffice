@@ -1,0 +1,53 @@
+name: One-shot Gemini schema fix
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'packages/ai-provider/src/gemini-schema.ts'
+      - '.github/workflows/one-shot-gemini-schema-fix.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Patch Gemini transport
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs')
+          const path = 'packages/ai-provider/src/robust-stream.ts'
+          let s = fs.readFileSync(path, 'utf8')
+          if (!s.includes("from './gemini-schema'")) {
+            const anchor = "import { createStreamWatchdog } from './watchdog'\n"
+            if (!s.includes(anchor)) throw new Error('watchdog import anchor not found')
+            s = s.replace(anchor, anchor + "import { toGeminiSchema } from './gemini-schema'\n")
+          }
+          const before = 'parameters: t.inputSchema,'
+          const marker = 'async function gemini('
+          const start = s.indexOf(marker)
+          if (start < 0) throw new Error('Gemini function not found')
+          const end = s.indexOf('\nasync function ', start + marker.length)
+          const section = end >= 0 ? s.slice(start, end) : s.slice(start)
+          if (!section.includes(before)) throw new Error('Gemini schema assignment not found')
+          const replaced = section.replace(before, 'parameters: toGeminiSchema(t.inputSchema),')
+          s = s.slice(0, start) + replaced + (end >= 0 ? s.slice(end) : '')
+          fs.writeFileSync(path, s)
+          NODE
+          npx prettier --write packages/ai-provider/src/robust-stream.ts packages/ai-provider/src/gemini-schema.ts
+          npx eslint packages/ai-provider/src/robust-stream.ts packages/ai-provider/src/gemini-schema.ts
+          npx tsc --noEmit -p packages/ai-provider/tsconfig.json
+      - name: Commit source fix and remove migration workflow
+        run: |
+          rm -f .github/workflows/one-shot-gemini-schema-fix.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add packages/ai-provider/src/robust-stream.ts packages/ai-provider/src/gemini-schema.ts .github/workflows/one-shot-gemini-schema-fix.yml
+          git commit -m 'fix(ai): adapt JSON Schema tools for Gemini'
+          git push
