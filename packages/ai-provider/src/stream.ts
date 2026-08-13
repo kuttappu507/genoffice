@@ -26,5 +26,14 @@ export async function streamForProvider(
   maxTokens: number,
   cb: StreamCallbacks,
 ): Promise<void> {
-  return streamForProviderEnhanced(provider, config, system, messages, tools, maxTokens, cb, AiCreditsError)
+  return streamForProviderEnhanced(
+    provider,
+    config,
+    system,
+    messages,
+    tools,
+    maxTokens,
+    cb,
+    AiCreditsError,
+  )
 }
