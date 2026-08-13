@@ -79,9 +79,7 @@ function parseTool(raw: string): { input: Record<string, unknown>; inputError?: 
   if (!raw.trim()) return { input: {} }
   try {
     return { input: JSON.parse(raw) as Record<string, unknown> }
-  } catch {
-    // Try a conservative repair for malformed streamed JSON string boundaries.
-  }
+  } catch {}
   try {
     return { input: JSON.parse(jsonRepair(raw)) as Record<string, unknown> }
   } catch {
@@ -161,11 +159,15 @@ function assistantMessages(system: string, messages: AgentMessage[]): unknown[] 
         type: 'function',
         function: { name: c.name, arguments: JSON.stringify(c.input ?? {}) },
       }))
-      out.push({
-        role: 'assistant',
-        content: m.text || (tools?.length ? null : ''),
-        ...(tools?.length ? { tool_calls: tools } : {}),
-      })
+      // Do not send an artificial empty assistant turn. It is unnecessary and
+      // some OpenAI-compatible gateways reject an empty assistant message.
+      if (m.text || tools?.length) {
+        out.push({
+          role: 'assistant',
+          content: m.text || null,
+          ...(tools?.length ? { tool_calls: tools } : {}),
+        })
+      }
     } else {
       for (const r of m.results) {
         out.push({ role: 'tool', tool_call_id: r.id, content: r.output })
@@ -178,17 +180,15 @@ function assistantMessages(system: string, messages: AgentMessage[]): unknown[] 
 function anthropicMessages(messages: AgentMessage[]) {
   return messages.map((m) => {
     if (m.role === 'user') {
+      if (!m.images?.length) return { role: 'user', content: m.text ?? '' }
       const content = [
         ...(m.text ? [{ type: 'text', text: m.text }] : []),
-        ...(m.images ?? []).map((img) => ({
+        ...m.images.map((img) => ({
           type: 'image',
           source: { type: 'base64', media_type: img.mime, data: img.base64 },
         })),
       ]
-      return {
-        role: 'user',
-        content: content.length ? content : [{ type: 'text', text: '' }],
-      }
+      return { role: 'user', content }
     }
     if (m.role === 'assistant') {
       const content: unknown[] = []
@@ -226,14 +226,14 @@ function geminiMessages(messages: AgentMessage[]) {
       const parts: unknown[] = []
       if (m.text) parts.push({ text: m.text })
       for (const c of m.toolCalls ?? []) {
-        parts.push({ functionCall: { name: c.name, args: c.input } })
+        parts.push({ functionCall: { id: c.id, name: c.name, args: c.input } })
       }
       return { role: 'model', parts: parts.length ? parts : [{ text: '' }] }
     }
     return {
       role: 'user',
       parts: m.results.map((r) => ({
-        functionResponse: { name: r.name, response: { result: r.output } },
+        functionResponse: { id: r.id, name: r.name, response: { result: r.output } },
       })),
     }
   })
@@ -562,7 +562,9 @@ async function gemini(
       body: JSON.stringify({
         systemInstruction: { parts: [{ text: system }] },
         contents: geminiMessages(messages),
-        generationConfig: { temperature: 0.3, maxOutputTokens: maxTokens },
+        // Keep this payload minimal. The legacy generateContent endpoint is
+        // stricter than the newer Interactions API about optional fields.
+        generationConfig: { maxOutputTokens: maxTokens },
         ...(tools.length
           ? {
               tools: [
