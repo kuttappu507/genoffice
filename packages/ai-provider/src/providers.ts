@@ -14,7 +14,7 @@ export function gensparkAttributionHeaders(baseUrl?: string): Record<string, str
   return baseUrl?.startsWith('https://www.genspark.ai') ? { 'X-Agent-Type': GENSPARK_AGENT_TYPE } : {}
 }
 
-/** Curated Nemotron IDs surfaced immediately in Settings. Users can still type any model ID into a compatible provider. */
+/** Curated defaults shown as recommendations in docs/comments; direct providers accept any model ID. */
 export const OPENROUTER_NEMOTRON_MODELS = [
   'nvidia/nemotron-3-ultra-550b-a55b:free',
   'nvidia/nemotron-3-super-120b-a12b:free',
@@ -34,7 +34,7 @@ export const AI_PROVIDERS: AiProviderMeta[] = [
   {
     id: 'openrouter',
     label: 'OpenRouter',
-    models: OPENROUTER_NEMOTRON_MODELS,
+    models: [],
     defaultModel: 'nvidia/nemotron-3-ultra-550b-a55b:free',
     keyPlaceholder: 'sk-or-v1-...',
     supportsTools: true,
@@ -44,7 +44,7 @@ export const AI_PROVIDERS: AiProviderMeta[] = [
   {
     id: 'nvidia',
     label: 'NVIDIA NIM',
-    models: NVIDIA_NEMOTRON_MODELS,
+    models: [],
     defaultModel: 'nvidia/nemotron-3-super-120b-a12b',
     keyPlaceholder: 'nvapi-...',
     supportsTools: true,
@@ -72,7 +72,7 @@ export const AI_PROVIDERS: AiProviderMeta[] = [
   {
     id: 'anthropic',
     label: 'Claude',
-    models: ['claude-opus-4-1', 'claude-opus-4-0', 'claude-sonnet-4-0', 'claude-sonnet-4-5'],
+    models: [],
     defaultModel: 'claude-sonnet-4-0',
     keyPlaceholder: 'sk-ant-api03-...',
     supportsTools: true,
@@ -82,14 +82,7 @@ export const AI_PROVIDERS: AiProviderMeta[] = [
   {
     id: 'gemini',
     label: 'Gemini',
-    models: [
-      'gemini-3.6-flash',
-      'gemini-3.5-flash',
-      'gemini-3.5-flash-lite',
-      'gemini-3.1-flash-lite',
-      'gemini-2.5-flash',
-      'gemini-2.5-pro',
-    ],
+    models: [],
     defaultModel: 'gemini-3.6-flash',
     keyPlaceholder: 'AIza...',
     supportsTools: true,
@@ -99,7 +92,7 @@ export const AI_PROVIDERS: AiProviderMeta[] = [
   {
     id: 'deepseek',
     label: 'DeepSeek',
-    models: ['deepseek-chat', 'deepseek-reasoner'],
+    models: [],
     defaultModel: 'deepseek-chat',
     keyPlaceholder: 'sk-...',
     supportsTools: true,
@@ -109,7 +102,7 @@ export const AI_PROVIDERS: AiProviderMeta[] = [
   {
     id: 'openai',
     label: 'OpenAI',
-    models: ['gpt-4.1', 'gpt-4.1-mini', 'gpt-4o', 'gpt-4o-mini'],
+    models: [],
     defaultModel: 'gpt-4.1-mini',
     keyPlaceholder: 'sk-...',
     supportsTools: true,
