@@ -57,37 +57,42 @@ export const AI_PROVIDERS: AiProviderMeta[] = [
 
 export function defaultAiSettings(defaultApiKeys?: Partial<Record<AiProviderId, string>>): AiSettings {
   const providers = {} as AiSettings['providers']
-  for (const meta of AI_PROVIDERS) providers[meta.id] = { apiKey: defaultApiKeys?.[meta.id] ?? '', model: meta.defaultModel, baseUrl: meta.needsBaseUrl ? '' : undefined }
+  for (const meta of AI_PROVIDERS) {
+    providers[meta.id] = {
+      apiKey: defaultApiKeys?.[meta.id] ?? '',
+      model: meta.defaultModel,
+      baseUrl: meta.needsBaseUrl ? '' : undefined,
+    }
+  }
   return { provider: 'openrouter', providers }
 }
 
-export function resolveAiSettings(stored: Partial<AiSettings> & LegacyAiSettings, defaults: AiSettings): AiSettings {
+export function resolveAiSettings(
+  stored: Partial<AiSettings> & LegacyAiSettings,
+  defaults: AiSettings,
+): AiSettings {
   if (!stored.providers) {
-    if (stored.apiKey) defaults.providers.custom = { apiKey: stored.apiKey, model: stored.model ?? '', baseUrl: stored.baseUrl ?? 'https://api.openai.com/v1' }
+    if (stored.apiKey) {
+      defaults.providers.custom = {
+        apiKey: stored.apiKey,
+        model: stored.model ?? '',
+        baseUrl: stored.baseUrl ?? 'https://api.openai.com/v1',
+      }
+    }
     return defaults
   }
 
-  // Genspark was the old default/authenticated provider. Existing installations
-  // must migrate to a direct provider rather than reopening the legacy sign-in path.
-  const migratedProvider = stored.provider && stored.provider !== 'genspark' ? stored.provider : defaults.provider
-  const settings: AiSettings = {
-    provider: migratedProvider,
-    providers: { ...defaults.providers, ...stored.providers },
-  }
+  // Migrate the legacy Genspark default to the direct-provider default.
+  // Return a plain structured-cloneable object: this crosses Electron IPC.
+  const provider = stored.provider && stored.provider !== 'genspark'
+    ? stored.provider
+    : defaults.provider
 
-  // Older shell builds attempted to force `settings.provider = 'genspark'` after
-  // resolving settings. Ignore only that obsolete assignment while keeping all
-  // legitimate direct-provider changes writable.
-  let activeProvider = migratedProvider
-  return new Proxy(settings, {
-    get(target, property, receiver) {
-      if (property === 'provider') return activeProvider
-      return Reflect.get(target, property, receiver)
+  return {
+    provider,
+    providers: {
+      ...defaults.providers,
+      ...stored.providers,
     },
-    set(target, property, value, receiver) {
-      if (property === 'provider' && value === 'genspark') return true
-      if (property === 'provider') activeProvider = value as AiProviderId
-      return Reflect.set(target, property, value, receiver)
-    },
-  })
+  }
 }
