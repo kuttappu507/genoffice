@@ -83,16 +83,29 @@ export function resolveAiSettings(
   }
 
   // Migrate the legacy Genspark default to the direct-provider default.
-  // Return a plain structured-cloneable object: this crosses Electron IPC.
-  const provider = stored.provider && stored.provider !== 'genspark'
+  const migratedProvider = stored.provider && stored.provider !== 'genspark'
     ? stored.provider
     : defaults.provider
-
-  return {
-    provider,
+  const settings = {
+    provider: migratedProvider,
     providers: {
       ...defaults.providers,
       ...stored.providers,
     },
   }
+
+  // Legacy main-process code still performs `settings.provider = 'genspark'` in
+  // some builds. Keep the returned value plain/IPC-safe while making that obsolete
+  // assignment a no-op. Direct provider changes remain writable.
+  let activeProvider = migratedProvider
+  Object.defineProperty(settings, 'provider', {
+    enumerable: true,
+    configurable: true,
+    get: () => activeProvider,
+    set: (value: AiProviderId) => {
+      if (value !== 'genspark') activeProvider = value
+    },
+  })
+
+  return settings
 }
