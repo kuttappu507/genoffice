@@ -4,7 +4,7 @@ import { AI_PROVIDERS, defaultAiSettings, resolveAiSettings } from '../src/provi
 describe('defaultAiSettings', () => {
   it('gives every provider its default model and an empty key by default', () => {
     const settings = defaultAiSettings()
-    expect(settings.provider).toBe('genspark')
+    expect(settings.provider).toBe('openrouter')
     for (const meta of AI_PROVIDERS) {
       expect(settings.providers[meta.id].apiKey).toBe('')
       expect(settings.providers[meta.id].model).toBe(meta.defaultModel)
@@ -37,7 +37,6 @@ describe('resolveAiSettings', () => {
       model: 'legacy-model',
       baseUrl: 'https://legacy.example.com/v1',
     })
-    // untouched providers keep their defaults
     expect(resolved.providers.anthropic).toEqual(defaults.providers.anthropic)
   })
 
@@ -59,7 +58,6 @@ describe('resolveAiSettings', () => {
     )
     expect(resolved.provider).toBe('gemini')
     expect(resolved.providers.gemini).toEqual({ apiKey: 'stored-gemini-key', model: 'gemini-2.5-pro' })
-    // provider not mentioned in stored.providers keeps the computed default
     expect(resolved.providers.anthropic.apiKey).toBe('preset-key')
   })
 })
