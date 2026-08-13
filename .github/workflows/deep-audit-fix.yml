@@ -22,45 +22,113 @@ jobs:
           cache: npm
           cache-dependency-path: package-lock.json
       - run: npm ci
-      - name: Remove legacy provider override and normalize audit fixes
+      - name: Apply deep audit fixes
         shell: bash
         run: |
           node <<'NODE'
           const fs = require('node:fs')
+          const replaceOnce = (file, from, to, required = false) => {
+            let text = fs.readFileSync(file, 'utf8')
+            if (!text.includes(from)) {
+              if (required) throw new Error(`Patch anchor not found: ${file}`)
+              return
+            }
+            text = text.replace(from, to)
+            fs.writeFileSync(file, text)
+          }
 
-          const docs = 'apps/docs/src/main/docs-main.ts'
-          let docsText = fs.readFileSync(docs, 'utf8')
-          const docsOld = "    // AI features all go through Genspark (gsk login); legacy settings with another provider are reset\n    settings.provider = 'genspark'\n"
-          if (!docsText.includes(docsOld)) throw new Error('Docs legacy provider override anchor not found')
-          docsText = docsText.replace(docsOld, '')
-          fs.writeFileSync(docs, docsText)
+          // Remove the final legacy Docs provider override if it is still present.
+          replaceOnce(
+            'apps/docs/src/main/docs-main.ts',
+            "    // AI features all go through Genspark (gsk login); legacy settings with another provider are reset\n    settings.provider = 'genspark'\n",
+            '',
+          )
 
-          const providers = 'packages/ai-provider/src/providers.ts'
-          let providerText = fs.readFileSync(providers, 'utf8')
-          const start = providerText.indexOf('  let activeProvider:')
-          const end = providerText.lastIndexOf('\n}')
-          if (start < 0 || end <= start) throw new Error('Provider compatibility fence anchor not found')
-          providerText = providerText.slice(0, start) + "  return {\n    provider: migratedProvider === 'genspark' ? defaults.provider : migratedProvider,\n    providers,\n  }\n" + providerText.slice(end + 1)
-          fs.writeFileSync(providers, providerText)
+          // Remove the temporary provider setter fence if still present.
+          {
+            const file = 'packages/ai-provider/src/providers.ts'
+            let text = fs.readFileSync(file, 'utf8')
+            const start = text.indexOf('  let activeProvider:')
+            const end = text.lastIndexOf('\n}')
+            if (start >= 0 && end > start) {
+              text = text.slice(0, start) + "  return {\n    provider: migratedProvider === 'genspark' ? defaults.provider : migratedProvider,\n    providers,\n  }\n" + text.slice(end + 1)
+              fs.writeFileSync(file, text)
+            }
+          }
 
-          const secure = 'packages/ai-provider/src/electron-secure-ipc.ts'
-          let secureText = fs.readFileSync(secure, 'utf8')
-          const oldSecure = "    if (typeof process === 'undefined' || process.type !== 'browser') return null\n"
-          const newSecure = "    if (typeof process === 'undefined' || (process as NodeJS.Process & { type?: string }).type !== 'browser') return null\n"
-          if (!secureText.includes(oldSecure)) throw new Error('secure IPC process guard anchor not found')
-          secureText = secureText.replace(oldSecure, newSecure)
-          fs.writeFileSync(secure, secureText)
+          // Windows typecheck exposed this Electron-only Process property as missing from Node typings.
+          replaceOnce(
+            'packages/ai-provider/src/electron-secure-ipc.ts',
+            "    if (typeof process === 'undefined' || process.type !== 'browser') return null\n",
+            "    if (typeof process === 'undefined' || (process as NodeJS.Process & { type?: string }).type !== 'browser') return null\n",
+          )
+
+          // DeepSeek removed the legacy deepseek-chat/deepseek-reasoner names on 2026-07-24.
+          replaceOnce(
+            'packages/ai-provider/src/providers.ts',
+            "    defaultModel: 'deepseek-chat',",
+            "    defaultModel: 'deepseek-v4-flash',",
+            true,
+          )
+
+          // Gemini 3.6: current API no longer accepts sampling parameters, and tool-call IDs must round-trip.
+          {
+            const file = 'packages/ai-provider/src/stream.ts'
+            let text = fs.readFileSync(file, 'utf8')
+            replaceOnce(file, "for (const c of m.toolCalls ?? []) parts.push({ functionCall: { name: c.name, args: c.input } })", "for (const c of m.toolCalls ?? []) parts.push({ functionCall: { id: c.id, name: c.name, args: c.input } })", true)
+            replaceOnce(file, "functionResponse: { name: r.name, response: { result: r.output } },", "functionResponse: { id: r.id, name: r.name, response: { result: r.output } },", true)
+            replaceOnce(file, "generationConfig: { temperature: 0.3, maxOutputTokens: maxTokens },", "generationConfig: { maxOutputTokens: maxTokens },", true)
+            replaceOnce(file, "functionCall?: { name?: string; args?: Record<string, unknown> }", "functionCall?: { id?: string; name?: string; args?: Record<string, unknown> }", true)
+            replaceOnce(file, "const signature = `${call.name}:${JSON.stringify(call.args ?? {})}`", "const signature = call.id ?? `${call.name}:${JSON.stringify(call.args ?? {})}`", true)
+            replaceOnce(file, "cb.onToolCall({ id: crypto.randomUUID(), name: call.name, input: call.args ?? {} })", "cb.onToolCall({ id: call.id ?? crypto.randomUUID(), name: call.name, input: call.args ?? {} })", true)
+          }
+
+          // Make intentional API-key removal possible without exposing the saved secret.
+          replaceOnce(
+            'packages/ai-provider/src/types.ts',
+            "  baseUrl?: string | undefined\n",
+            "  baseUrl?: string | undefined\n  /** Transient UI flag consumed by the secure settings adapter; never persisted. */\n  clearApiKey?: boolean | undefined\n",
+          )
+
+          // Settings UI: track explicit clearing separately from the masked/empty value returned by main.
+          {
+            const file = 'apps/shell/src/renderer/src/SettingsModal.tsx'
+            let text = fs.readFileSync(file, 'utf8')
+            replaceOnce(file, "  const [aiLoading, setAiLoading] = useState(true)\n", "  const [aiLoading, setAiLoading] = useState(true)\n  const [aiClearKey, setAiClearKey] = useState(false)\n", true)
+            replaceOnce(file, "        setAiKey(current?.apiKey ?? '')\n", "        setAiKey(current?.apiKey ?? '')\n        setAiClearKey(false)\n", true)
+            replaceOnce(file, "    setAiProvider(provider)\n    setAiKey(current?.apiKey ?? '')\n", "    setAiProvider(provider)\n    setAiKey(current?.apiKey ?? '')\n    setAiClearKey(false)\n", true)
+            replaceOnce(file, "                      setAiKey(e.target.value)\n                      setAiSaved(false)\n", "                      setAiKey(e.target.value)\n                      setAiClearKey(false)\n                      setAiSaved(false)\n", true)
+            replaceOnce(file, "      providers[aiProvider] = {\n        ...previous,\n        apiKey: aiKey.trim(),\n", "      providers[aiProvider] = {\n        ...previous,\n        apiKey: aiKey.trim(),\n        clearApiKey: aiClearKey || undefined,\n", true)
+            text = fs.readFileSync(file, 'utf8')
+            const inputAnchor = `                  <input\n                    id=\"ai-key\"\n                    className=\"set-select\"\n                    style={{ minWidth: 250, padding: '8px 10px' }}\n                    type=\"password\"\n                    value={aiKey}\n                    placeholder={aiMeta?.keyPlaceholder ?? 'API Key'}\n                    onChange={(e) => {\n                      setAiKey(e.target.value)\n                      setAiClearKey(false)\n                      setAiSaved(false)\n                    }}\n                  />`
+            if (text.includes(inputAnchor)) {
+              const replacement = `${inputAnchor}\n                  <button className=\"set-btn danger\" type=\"button\" onClick={() => { setAiKey(''); setAiClearKey(true); setAiSaved(false) }}>Clear</button>`
+              text = text.replace(inputAnchor, replacement)
+              fs.writeFileSync(file, text)
+            }
+          }
+
+          // Secure adapter consumes and strips the transient clear flag.
+          {
+            const file = 'packages/ai-provider/src/electron-secure-ipc.ts'
+            let text = fs.readFileSync(file, 'utf8')
+            const oldBlock = `    const incoming = typeof (cfg as any)?.apiKey === 'string' ? (cfg as any).apiKey : ''\n    const keepExisting = incoming === ''\n    providers[id] = {\n      ...(cfg as any),\n      apiKey: keepExisting\n        ? typeof old.apiKey === 'string'\n          ? old.apiKey\n          : ''\n        : encryptKey(safeStorage, incoming),\n    }`
+            const newBlock = `    const clearApiKey = (cfg as any)?.clearApiKey === true\n    const incoming = typeof (cfg as any)?.apiKey === 'string' ? (cfg as any).apiKey : ''\n    const keepExisting = incoming === '' && !clearApiKey\n    const nextConfig = { ...(cfg as any) }\n    delete nextConfig.clearApiKey\n    providers[id] = {\n      ...nextConfig,\n      apiKey: clearApiKey\n        ? ''\n        : keepExisting\n          ? typeof old.apiKey === 'string'\n            ? old.apiKey\n            : ''\n          : encryptKey(safeStorage, incoming),\n    }`
+            if (!text.includes(oldBlock)) throw new Error('secure settings encryption block anchor not found')
+            text = text.replace(oldBlock, newBlock)
+            fs.writeFileSync(file, text)
+          }
           NODE
       - name: Format changed sources
-        run: npx prettier --write apps/docs/src/main/docs-main.ts packages/ai-provider/src/providers.ts packages/ai-provider/src/electron-secure-ipc.ts apps/slides/src/main/ai-ipc.ts
+        run: npx prettier --write apps/docs/src/main/docs-main.ts packages/ai-provider/src/providers.ts packages/ai-provider/src/electron-secure-ipc.ts packages/ai-provider/src/stream.ts packages/ai-provider/src/types.ts apps/shell/src/renderer/src/SettingsModal.tsx apps/slides/src/main/ai-ipc.ts
       - name: Verify focused lint
-        run: npx eslint apps/docs/src/main/docs-main.ts packages/ai-provider/src/providers.ts packages/ai-provider/src/electron-secure-ipc.ts apps/slides/src/main/ai-ipc.ts apps/android/src/pdf-android-platform.ts
+        run: npx eslint apps/docs/src/main/docs-main.ts packages/ai-provider/src/providers.ts packages/ai-provider/src/electron-secure-ipc.ts packages/ai-provider/src/stream.ts packages/ai-provider/src/types.ts apps/shell/src/renderer/src/SettingsModal.tsx apps/slides/src/main/ai-ipc.ts apps/android/src/pdf-android-platform.ts
       - name: Verify typecheck
         run: npm run typecheck
       - name: Commit
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add apps/docs/src/main/docs-main.ts packages/ai-provider/src/providers.ts packages/ai-provider/src/electron-secure-ipc.ts apps/slides/src/main/ai-ipc.ts
-          git commit -m 'fix(ai): remove legacy override and fix secure IPC typing [deep-audit]'
+          git add apps/docs/src/main/docs-main.ts packages/ai-provider/src/providers.ts packages/ai-provider/src/electron-secure-ipc.ts packages/ai-provider/src/stream.ts packages/ai-provider/src/types.ts apps/shell/src/renderer/src/SettingsModal.tsx apps/slides/src/main/ai-ipc.ts
+          git commit -m 'fix(ai): complete provider audit and secure key management [deep-audit]'
           git push
