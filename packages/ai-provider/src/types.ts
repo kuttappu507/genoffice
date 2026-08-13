@@ -10,6 +10,7 @@ export interface GenSparkAccountStatus {
 
 export interface AiProviderConfig {
   apiKey: string
+  /** Direct providers accept any valid model ID; the registry supplies a recommended default. */
   model: string
   /** only used by the custom (OpenAI-compatible) provider */
   baseUrl?: string | undefined
