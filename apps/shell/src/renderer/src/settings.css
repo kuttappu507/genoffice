@@ -213,9 +213,7 @@
 }
 
 /* AI Settings text/password/model inputs must NOT use the invisible native
-   select overlay rules above. The previous shared class caused an invisible
-   full-viewport input to capture all mouse/keyboard events and made the whole
-   Settings window appear frozen. */
+   select overlay rules above. */
 input.set-select {
   position: static;
   inset: auto;
@@ -239,6 +237,40 @@ input.set-select:focus {
 
 input.set-select::placeholder {
   color: var(--text-tertiary);
+}
+
+/* AI provider/model selectors are intentionally real visible controls.
+   The older invisible select overlay hid the selected value, making it look
+   like provider changes were not taking effect. */
+.set-select-wrap:has(#ai-provider),
+.set-select-wrap:has(#ai-model) {
+  padding: 0;
+  background: transparent;
+}
+
+#set-provider,
+#ai-provider,
+#ai-model {
+  position: static;
+  inset: auto;
+  opacity: 1;
+  width: 320px;
+  min-width: 260px;
+  height: 36px;
+  box-sizing: border-box;
+  padding: 6px 30px 6px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text-primary);
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+#ai-provider:focus,
+#ai-model:focus {
+  outline: 2px solid color-mix(in srgb, var(--color-btn-primary) 25%, transparent);
+  outline-offset: 1px;
 }
 
 .set-btn {
