@@ -1,0 +1,53 @@
+name: Deep audit fix
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - run: npm ci
+      - name: Remove legacy provider override and canonicalize formatting
+        shell: bash
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs')
+
+          const docs = 'apps/docs/src/main/docs-main.ts'
+          let docsText = fs.readFileSync(docs, 'utf8')
+          const docsOld = "    // AI features all go through Genspark (gsk login); legacy settings with another provider are reset\n    settings.provider = 'genspark'\n"
+          if (!docsText.includes(docsOld)) throw new Error('Docs legacy provider override anchor not found')
+          docsText = docsText.replace(docsOld, '')
+          fs.writeFileSync(docs, docsText)
+
+          const providers = 'packages/ai-provider/src/providers.ts'
+          let providerText = fs.readFileSync(providers, 'utf8')
+          const fenceOld = `  let activeProvider: AiProviderId = migratedProvider === 'genspark' ? defaults.provider : migratedProvider\n  const settings = { provider: activeProvider, providers }\n  // Temporary compatibility fence: upstream-derived main-process code may still assign\n  // settings.provider = 'genspark'. Ignore that one obsolete assignment while allowing\n  // every real provider selection to remain writable. This will be removed when that\n  // upstream-derived handler is fully deleted.\n  Object.defineProperty(settings, 'provider', {\n    enumerable: true,\n    configurable: true,\n    get: () => activeProvider,\n    set: (value: AiProviderId) => {\n      if (value !== 'genspark' && AI_PROVIDERS.some((meta) => meta.id === value)) activeProvider = value\n    },\n  })\n  return settings\n`
+          const fenceNew = `  return {\n    provider: migratedProvider === 'genspark' ? defaults.provider : migratedProvider,\n    providers,\n  }\n`
+          if (!providerText.includes(fenceOld)) throw new Error('Provider compatibility fence anchor not found')
+          providerText = providerText.replace(fenceOld, fenceNew)
+          fs.writeFileSync(providers, providerText)
+          NODE
+      - name: Format changed sources
+        run: npx prettier --write apps/docs/src/main/docs-main.ts packages/ai-provider/src/providers.ts apps/slides/src/main/ai-ipc.ts
+      - name: Verify focused lint
+        run: npx eslint apps/docs/src/main/docs-main.ts packages/ai-provider/src/providers.ts packages/ai-provider/src/electron-secure-ipc.ts apps/slides/src/main/ai-ipc.ts apps/android/src/pdf-android-platform.ts
+      - name: Verify typecheck
+        run: npm run typecheck
+      - name: Commit
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add apps/docs/src/main/docs-main.ts packages/ai-provider/src/providers.ts apps/slides/src/main/ai-ipc.ts
+          git commit -m 'fix(ai): remove legacy provider override and normalize audit fixes [deep-audit]'
+          git push
