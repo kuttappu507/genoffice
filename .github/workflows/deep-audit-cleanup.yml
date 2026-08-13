@@ -1,0 +1,43 @@
+name: Deep Audit Cleanup
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - run: npm ci
+      - name: Apply cleanup
+        shell: bash
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs')
+          const secure = 'packages/ai-provider/src/electron-secure-ipc.ts'
+          let s = fs.readFileSync(secure, 'utf8')
+          const start = s.indexOf('\nfunction normalizeProviders(')
+          if (start >= 0) {
+            const end = s.indexOf('\nfunction encryptSettings(', start)
+            if (end < 0) throw new Error('encryptSettings anchor not found')
+            s = s.slice(0, start) + s.slice(end)
+          }
+          fs.writeFileSync(secure, s)
+          NODE
+          npx prettier --write apps/slides/src/main/ai-ipc.ts packages/ai-provider/src/electron-secure-ipc.ts
+      - name: Commit cleanup
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add apps/slides/src/main/ai-ipc.ts packages/ai-provider/src/electron-secure-ipc.ts
+          git commit -m 'fix(ai): clean audited provider IPC sources [deep-audit-cleanup]'
+          git push
