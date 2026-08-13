@@ -30,8 +30,6 @@ interface StoredSettings {
 function tryGetElectronMain(): { ipcMain: any; safeStorage: any; app: any } | null {
   try {
     if (typeof process === 'undefined' || process.type !== 'browser') return null
-    // Keep the electron import out of renderer bundles. electron-vite leaves this
-    // path available in the main process, while renderer execution never reaches it.
     const getRequire = Function('return require') as () => NodeRequire
     const req = getRequire()
     const electron = req('electron') as { ipcMain: any; safeStorage: any; app: any }
@@ -88,17 +86,6 @@ function decryptKey(safeStorage: any, value: unknown): string {
   } catch {
     return ''
   }
-}
-
-function normalizeProviders(stored: StoredSettings, safeStorage: any): Record<string, StoredProviderConfig> {
-  const providers = { ...(stored.providers ?? {}) }
-  for (const [id, cfg] of Object.entries(providers)) {
-    providers[id] = {
-      ...(cfg ?? {}),
-      apiKey: decryptKey(safeStorage, cfg?.apiKey),
-    }
-  }
-  return providers
 }
 
 function encryptSettings(input: any, existing: StoredSettings, safeStorage: any): any {
@@ -171,7 +158,6 @@ export function installSecureAiIpcAdapter(): void {
 
       if (channel === 'ai:get-settings') {
         const result = await listener(event, ...args)
-        // Opportunistically migrate legacy plaintext keys to OS-backed storage.
         if (existing.providers && safeStorage.isEncryptionAvailable()) {
           const encrypted = { ...existing, providers: { ...(existing.providers ?? {}) } }
           let changed = false
