@@ -164,23 +164,8 @@ export function resolveAiSettings(
   const candidate = stored.provider
   const migratedProvider: AiProviderId =
     candidate && AI_PROVIDERS.some((meta) => meta.id === candidate) ? candidate : defaults.provider
-  let activeProvider: AiProviderId =
-    migratedProvider === 'genspark' ? defaults.provider : migratedProvider
-  const settings = { provider: activeProvider, providers }
-
-  // Temporary compatibility fence: upstream-derived main-process code may still assign
-  // settings.provider = 'genspark'. Ignore that one obsolete assignment while allowing
-  // every real provider selection to remain writable. This will be removed when that
-  // upstream-derived handler is fully deleted.
-  Object.defineProperty(settings, 'provider', {
-    enumerable: true,
-    configurable: true,
-    get: () => activeProvider,
-    set: (value: AiProviderId) => {
-      if (value !== 'genspark' && AI_PROVIDERS.some((meta) => meta.id === value)) {
-        activeProvider = value
-      }
-    },
-  })
-  return settings
+  return {
+    provider: migratedProvider === 'genspark' ? defaults.provider : migratedProvider,
+    providers,
+  }
 }

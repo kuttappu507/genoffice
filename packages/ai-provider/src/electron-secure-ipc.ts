@@ -29,7 +29,11 @@ interface StoredSettings {
 
 function tryGetElectronMain(): { ipcMain: any; safeStorage: any; app: any } | null {
   try {
-    if (typeof process === 'undefined' || process.type !== 'browser') return null
+    if (
+      typeof process === 'undefined' ||
+      (process as NodeJS.Process & { type?: string }).type !== 'browser'
+    )
+      return null
     const getRequire = Function('return require') as () => NodeRequire
     const req = getRequire()
     const electron = req('electron') as { ipcMain: any; safeStorage: any; app: any }
@@ -71,7 +75,9 @@ function encryptKey(safeStorage: any, value: string): string {
   if (!value) return ''
   if (value.startsWith(SECURE_PREFIX)) return value
   if (!safeStorage.isEncryptionAvailable()) {
-    throw new Error('Secure API-key storage is unavailable on this system. Enable the OS keychain/keyring and try again.')
+    throw new Error(
+      'Secure API-key storage is unavailable on this system. Enable the OS keychain/keyring and try again.',
+    )
   }
   const encrypted = safeStorage.encryptString(value).toString('base64')
   return `${SECURE_PREFIX}${encrypted}`
@@ -99,7 +105,9 @@ function encryptSettings(input: any, existing: StoredSettings, safeStorage: any)
     providers[id] = {
       ...(cfg as any),
       apiKey: keepExisting
-        ? (typeof old.apiKey === 'string' ? old.apiKey : '')
+        ? typeof old.apiKey === 'string'
+          ? old.apiKey
+          : ''
         : encryptKey(safeStorage, incoming),
     }
   }
@@ -111,7 +119,9 @@ function sanitizeSettings(result: any, safeStorage: any): any {
   if (!result || typeof result !== 'object') return result
   const next = structuredClone(result)
   if (next.providers && typeof next.providers === 'object') {
-    for (const [id, cfg] of Object.entries(next.providers as Record<string, StoredProviderConfig>)) {
+    for (const [id, cfg] of Object.entries(
+      next.providers as Record<string, StoredProviderConfig>,
+    )) {
       const key = decryptKey(safeStorage, (cfg as StoredProviderConfig)?.apiKey)
       ;(next.providers as any)[id] = { ...(cfg as any), apiKey: key ? MASKED_KEY : '' }
     }
@@ -126,7 +136,10 @@ function hydrateRequest(request: any, existing: StoredSettings, safeStorage: any
   if (!provider) return next
   const saved = existing.providers?.[provider] ?? {}
   const incoming = next.settings?.providers?.[provider]
-  const key = typeof incoming?.apiKey === 'string' && incoming.apiKey ? incoming.apiKey : decryptKey(safeStorage, saved.apiKey)
+  const key =
+    typeof incoming?.apiKey === 'string' && incoming.apiKey
+      ? incoming.apiKey
+      : decryptKey(safeStorage, saved.apiKey)
   if (next.settings?.providers?.[provider]) {
     next.settings.providers[provider] = {
       ...next.settings.providers[provider],
