@@ -28,3 +28,7 @@ export {
   createStreamWatchdog,
 } from './watchdog'
 export type { StreamWatchdog } from './watchdog'
+
+// Install the Electron-main IPC secret adapter before any editor registers its
+// ai:* handlers. In renderer processes this import is a no-op.
+import './electron-secure-ipc'
