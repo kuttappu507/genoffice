@@ -22,6 +22,12 @@ export interface AiProviderMeta {
   defaultModel: string
   keyPlaceholder: string
   needsBaseUrl?: boolean
+  /** Provider can execute function/tool calls used by Docs/Sheets/Slides agents. */
+  supportsTools: boolean
+  /** Provider can consume inline image attachments through the shared agent transport. */
+  supportsVision: boolean
+  /** Provider exposes streaming through the shared transport. */
+  supportsStreaming: boolean
 }
 
 export interface AiSettings {
