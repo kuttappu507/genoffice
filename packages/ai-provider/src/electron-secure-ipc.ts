@@ -29,11 +29,7 @@ interface StoredSettings {
 
 function tryGetElectronMain(): { ipcMain: any; safeStorage: any; app: any } | null {
   try {
-    if (
-      typeof process === 'undefined' ||
-      (process as NodeJS.Process & { type?: string }).type !== 'browser'
-    )
-      return null
+    if (typeof process === 'undefined' || !process.versions?.electron) return null
     const getRequire = Function('return require') as () => NodeRequire
     const req = getRequire()
     const electron = req('electron') as { ipcMain: any; safeStorage: any; app: any }
