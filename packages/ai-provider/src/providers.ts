@@ -11,7 +11,9 @@ export const GENSPARK_LLM_BASE_URLS = {
 } as const
 export const GENSPARK_AGENT_TYPE = 'genoffice'
 export function gensparkAttributionHeaders(baseUrl?: string): Record<string, string> {
-  return baseUrl?.startsWith('https://www.genspark.ai') ? { 'X-Agent-Type': GENSPARK_AGENT_TYPE } : {}
+  return baseUrl?.startsWith('https://www.genspark.ai')
+    ? { 'X-Agent-Type': GENSPARK_AGENT_TYPE }
+    : {}
 }
 
 /** Curated defaults shown as recommendations in docs/comments; direct providers accept any model ID. */
@@ -122,7 +124,9 @@ export const AI_PROVIDERS: AiProviderMeta[] = [
   },
 ]
 
-export function defaultAiSettings(defaultApiKeys?: Partial<Record<AiProviderId, string>>): AiSettings {
+export function defaultAiSettings(
+  defaultApiKeys?: Partial<Record<AiProviderId, string>>,
+): AiSettings {
   const providers = {} as AiSettings['providers']
   for (const meta of AI_PROVIDERS) {
     providers[meta.id] = {
@@ -147,8 +151,7 @@ export function resolveAiSettings(
       providers[meta.id] = {
         apiKey: typeof saved.apiKey === 'string' ? saved.apiKey : '',
         model: typeof saved.model === 'string' && saved.model ? saved.model : meta.defaultModel,
-        baseUrl:
-          typeof saved.baseUrl === 'string' ? saved.baseUrl : providers[meta.id]?.baseUrl,
+        baseUrl: typeof saved.baseUrl === 'string' ? saved.baseUrl : providers[meta.id]?.baseUrl,
       }
     }
   } else if (stored.apiKey) {
