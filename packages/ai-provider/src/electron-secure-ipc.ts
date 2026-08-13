@@ -100,15 +100,20 @@ function encryptSettings(input: any, existing: StoredSettings, safeStorage: any)
   const providers = { ...(next.providers ?? {}) }
   for (const [id, cfg] of Object.entries(providers)) {
     const old = existingProviders[id] ?? {}
+    const clearApiKey = (cfg as any)?.clearApiKey === true
     const incoming = typeof (cfg as any)?.apiKey === 'string' ? (cfg as any).apiKey : ''
-    const keepExisting = incoming === ''
+    const keepExisting = incoming === '' && !clearApiKey
+    const nextConfig = { ...(cfg as any) }
+    delete nextConfig.clearApiKey
     providers[id] = {
-      ...(cfg as any),
-      apiKey: keepExisting
-        ? typeof old.apiKey === 'string'
-          ? old.apiKey
-          : ''
-        : encryptKey(safeStorage, incoming),
+      ...nextConfig,
+      apiKey: clearApiKey
+        ? ''
+        : keepExisting
+          ? typeof old.apiKey === 'string'
+            ? old.apiKey
+            : ''
+          : encryptKey(safeStorage, incoming),
     }
   }
   next.providers = providers

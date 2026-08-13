@@ -161,6 +161,7 @@ export function SettingsModal({
   const [aiSaved, setAiSaved] = useState(false)
   const [aiError, setAiError] = useState<string | null>(null)
   const [aiLoading, setAiLoading] = useState(true)
+  const [aiClearKey, setAiClearKey] = useState(false)
 
   useEffect(() => {
     let alive = true
@@ -185,6 +186,7 @@ export function SettingsModal({
         setAiProvider(settings.provider)
         const current = settings.providers[settings.provider]
         setAiKey(current?.apiKey ?? '')
+        setAiClearKey(false)
         setAiModel(current?.model ?? '')
         setAiBaseUrl(current?.baseUrl ?? '')
       })
@@ -230,6 +232,7 @@ export function SettingsModal({
     const current = aiSettings.providers[provider]
     setAiProvider(provider)
     setAiKey(current?.apiKey ?? '')
+    setAiClearKey(false)
     setAiBaseUrl(current?.baseUrl ?? '')
     setAiModel(current?.model || meta?.defaultModel || '')
     setAiSaved(false)
@@ -246,6 +249,7 @@ export function SettingsModal({
       providers[aiProvider] = {
         ...previous,
         apiKey: aiKey.trim(),
+        clearApiKey: aiClearKey || undefined,
         model: aiModel.trim(),
         baseUrl: aiProvider === 'custom' ? aiBaseUrl.trim() : previous.baseUrl,
       }
@@ -401,9 +405,21 @@ export function SettingsModal({
                     placeholder={aiMeta?.keyPlaceholder ?? 'API Key'}
                     onChange={(e) => {
                       setAiKey(e.target.value)
+                      setAiClearKey(false)
                       setAiSaved(false)
                     }}
                   />
+                  <button
+                    className="set-btn danger"
+                    type="button"
+                    onClick={() => {
+                      setAiKey('')
+                      setAiClearKey(true)
+                      setAiSaved(false)
+                    }}
+                  >
+                    Clear
+                  </button>
                 </div>
                 <div className="set-field">
                   <div className="set-field-text">

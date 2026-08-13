@@ -90,13 +90,19 @@ function generationConfig(config: AiProviderConfig): Record<string, number> {
   return { temperature: 0.3 }
 }
 
-function validateCapabilities(provider: AiProviderId, messages: AgentMessage[], tools: AgentToolDef[]): void {
+function validateCapabilities(
+  provider: AiProviderId,
+  messages: AgentMessage[],
+  tools: AgentToolDef[],
+): void {
   const meta = AI_PROVIDERS.find((item) => item.id === provider)
   if (!meta) throw new Error(`Provider ${provider} is not enabled in this build`)
   if (tools.length && !meta.supportsTools) {
     throw new Error(`${meta.label} does not support the office tools required by this action`)
   }
-  const hasImages = messages.some((message) => message.role === 'user' && Boolean(message.images?.length))
+  const hasImages = messages.some(
+    (message) => message.role === 'user' && Boolean(message.images?.length),
+  )
   if (hasImages && !meta.supportsVision) {
     throw new Error(`${meta.label} does not support image input for this request`)
   }
@@ -312,18 +318,20 @@ function geminiContents(messages: AgentMessage[]) {
     if (m.role === 'user') {
       const parts: unknown[] = []
       if (m.text) parts.push({ text: m.text })
-      for (const img of m.images ?? []) parts.push({ inlineData: { mimeType: img.mime, data: img.base64 } })
+      for (const img of m.images ?? [])
+        parts.push({ inlineData: { mimeType: img.mime, data: img.base64 } })
       out.push({ role: 'user', parts: parts.length ? parts : [{ text: '' }] })
     } else if (m.role === 'assistant') {
       const parts: unknown[] = []
       if (m.text) parts.push({ text: m.text })
-      for (const c of m.toolCalls ?? []) parts.push({ functionCall: { name: c.name, args: c.input } })
+      for (const c of m.toolCalls ?? [])
+        parts.push({ functionCall: { id: c.id, name: c.name, args: c.input } })
       out.push({ role: 'model', parts: parts.length ? parts : [{ text: '' }] })
     } else {
       out.push({
         role: 'user',
         parts: m.results.map((r) => ({
-          functionResponse: { name: r.name, response: { result: r.output } },
+          functionResponse: { id: r.id, name: r.name, response: { result: r.output } },
         })),
       })
     }
@@ -343,7 +351,7 @@ async function streamGemini(
   const body: Record<string, unknown> = {
     systemInstruction: { parts: [{ text: system }] },
     contents: geminiContents(messages),
-    generationConfig: { temperature: 0.3, maxOutputTokens: maxTokens },
+    generationConfig: { maxOutputTokens: maxTokens },
   }
   if (tools.length) {
     body.tools = [
@@ -379,7 +387,7 @@ async function streamGemini(
         content?: {
           parts?: Array<{
             text?: string
-            functionCall?: { name?: string; args?: Record<string, unknown> }
+            functionCall?: { id?: string; name?: string; args?: Record<string, unknown> }
           }>
         }
       }>
@@ -392,10 +400,14 @@ async function streamGemini(
       if (part.text) cb.onDelta(part.text)
       const call = part.functionCall
       if (call?.name) {
-        const signature = `${call.name}:${JSON.stringify(call.args ?? {})}`
+        const signature = call.id ?? `${call.name}:${JSON.stringify(call.args ?? {})}`
         if (!seenCalls.has(signature)) {
           seenCalls.add(signature)
-          cb.onToolCall({ id: crypto.randomUUID(), name: call.name, input: call.args ?? {} })
+          cb.onToolCall({
+            id: call.id ?? crypto.randomUUID(),
+            name: call.name,
+            input: call.args ?? {},
+          })
         }
       }
     }

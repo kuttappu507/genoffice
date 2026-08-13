@@ -1,6 +1,7 @@
 import type { AgentMessage, AgentToolCall, AgentToolDef } from '@genoffice/agent-core'
 
-export type AiProviderId = 'openrouter' | 'nvidia' | 'genspark' | 'anthropic' | 'gemini' | 'deepseek' | 'openai' | 'custom'
+export type AiProviderId =
+  'openrouter' | 'nvidia' | 'genspark' | 'anthropic' | 'gemini' | 'deepseek' | 'openai' | 'custom'
 
 /** Genspark account status retained only for legacy compatibility. */
 export interface GenSparkAccountStatus {
@@ -14,6 +15,8 @@ export interface AiProviderConfig {
   model: string
   /** only used by the custom (OpenAI-compatible) provider */
   baseUrl?: string | undefined
+  /** Transient UI flag consumed by the secure settings adapter; never persisted. */
+  clearApiKey?: boolean | undefined
 }
 
 export interface AiProviderMeta {
