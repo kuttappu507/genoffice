@@ -1,5 +1,5 @@
 type JsonSchema = {
-  type?: string
+  type?: string | string[]
   description?: string
   properties?: Record<string, JsonSchema>
   required?: string[]
@@ -11,9 +11,10 @@ type JsonSchema = {
 
 type GeminiSchema = Record<string, unknown>
 
-function normalizeType(type: string | undefined, schema: JsonSchema): string | undefined {
-  if (type) {
-    const normalized = type.toUpperCase()
+function normalizeType(type: string | string[] | undefined, schema: JsonSchema): string | undefined {
+  const candidate = Array.isArray(type) ? type.find((value) => value !== 'null') : type
+  if (candidate) {
+    const normalized = candidate.toUpperCase()
     if (['STRING', 'NUMBER', 'INTEGER', 'BOOLEAN', 'OBJECT', 'ARRAY'].includes(normalized)) {
       return normalized
     }
@@ -27,11 +28,10 @@ function mergeUnion(schema: JsonSchema): JsonSchema {
   const variants = schema.anyOf ?? schema.oneOf
   if (!variants?.length) return schema
 
-  // Gemini function-declaration schemas are a smaller subset of JSON Schema.
-  // In particular, nullable is not accepted reliably by the legacy
-  // generateContent/functionDeclarations endpoint. For nullable unions,
-  // keep the non-null branch and simply omit nullability from the declaration.
-  const nonNull = variants.filter((variant) => variant.type !== 'null')
+  const nonNull = variants.filter((variant) => {
+    if (Array.isArray(variant.type)) return !variant.type.includes('null')
+    return variant.type !== 'null'
+  })
   if (nonNull.length === 1) return nonNull[0]!
 
   return {
