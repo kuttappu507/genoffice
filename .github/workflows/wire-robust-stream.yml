@@ -1,0 +1,65 @@
+name: Wire Robust AI Stream
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'packages/ai-provider/src/robust-stream.ts'
+      - '.github/workflows/wire-robust-stream.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  wire:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - run: npm ci
+      - name: Wire wrapper
+        shell: bash
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs')
+          const path = 'packages/ai-provider/src/stream.ts'
+          let s = fs.readFileSync(path, 'utf8')
+          const importLine = "import type { AiProviderConfig, AiProviderId } from './types'\n"
+          if (!s.includes("from './robust-stream'")) {
+            if (!s.includes(importLine)) throw new Error('type import anchor not found')
+            s = s.replace(importLine, importLine + "import { streamForProviderEnhanced } from './robust-stream'\n")
+          }
+          const start = s.indexOf('export async function streamForProvider(')
+          if (start < 0) throw new Error('streamForProvider export not found')
+          const wrapper = [
+            'export async function streamForProvider(',
+            '  provider: AiProviderId,',
+            '  config: AiProviderConfig,',
+            '  system: string,',
+            '  messages: AgentMessage[],',
+            '  tools: AgentToolDef[],',
+            '  maxTokens: number,',
+            '  cb: StreamCallbacks,',
+            '): Promise<void> {',
+            '  return streamForProviderEnhanced(provider, config, system, messages, tools, maxTokens, cb, AiCreditsError)',
+            '}',
+            '',
+          ].join('\n')
+          s = s.slice(0, start) + wrapper
+          fs.writeFileSync(path, s)
+          NODE
+          npx prettier --write packages/ai-provider/src/stream.ts packages/ai-provider/src/robust-stream.ts
+          npx eslint packages/ai-provider/src/stream.ts packages/ai-provider/src/robust-stream.ts
+          npx tsc --noEmit -p packages/ai-provider/tsconfig.json
+      - name: Commit wiring
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add packages/ai-provider/src/stream.ts
+          git commit -m 'fix(ai): wire hardened provider transport [wire-robust-stream]'
+          git push
