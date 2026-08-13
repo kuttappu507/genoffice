@@ -7,7 +7,6 @@ type JsonSchema = {
   enum?: string[]
   anyOf?: JsonSchema[]
   oneOf?: JsonSchema[]
-  nullable?: boolean
 }
 
 type GeminiSchema = Record<string, unknown>
@@ -19,7 +18,6 @@ function normalizeType(type: string | undefined, schema: JsonSchema): string | u
       return normalized
     }
   }
-
   if (schema.properties) return 'OBJECT'
   if (schema.items) return 'ARRAY'
   return undefined
@@ -29,10 +27,12 @@ function mergeUnion(schema: JsonSchema): JsonSchema {
   const variants = schema.anyOf ?? schema.oneOf
   if (!variants?.length) return schema
 
+  // Gemini function-declaration schemas are a smaller subset of JSON Schema.
+  // In particular, nullable is not accepted reliably by the legacy
+  // generateContent/functionDeclarations endpoint. For nullable unions,
+  // keep the non-null branch and simply omit nullability from the declaration.
   const nonNull = variants.filter((variant) => variant.type !== 'null')
-  if (nonNull.length === 1) {
-    return { ...nonNull[0], description: schema.description ?? nonNull[0]?.description }
-  }
+  if (nonNull.length === 1) return nonNull[0]!
 
   return {
     type: 'STRING',
@@ -65,12 +65,9 @@ export function toGeminiSchema(input: unknown): GeminiSchema {
   }
 
   if (schema.items) {
-    // Gemini's Schema.items accepts one Schema object, not JSON Schema's tuple form.
-    // For tuple-style arrays, preserve the first item schema as the closest valid representation.
     const item = Array.isArray(schema.items) ? schema.items[0] : schema.items
     if (item) result.items = toGeminiSchema(item)
   }
 
-  if (schema.nullable === true) result.nullable = true
   return result
 }
